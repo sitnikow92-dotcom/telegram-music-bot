@@ -6,7 +6,7 @@ import re
 import uuid
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters.command import Command
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 import yt_dlp
 from yt_dlp.utils import match_filter_func
@@ -20,6 +20,40 @@ logging.basicConfig(level=logging.INFO)
 
 # Initialize dispatcher
 dp = Dispatcher()
+
+def format_duration(seconds: int) -> str:
+    """Formats duration in seconds to MM:SS or HH:MM:SS."""
+    if not seconds:
+        return "Unknown"
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+def search_youtube(query: str):
+    """Searches YouTube and returns a list of top 5 videos."""
+    ydl_opts = {
+        'extract_flat': True,
+        'quiet': True,
+        'match_filter': match_filter_func('!is_live')
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            results = []
+            for entry in info.get('entries', []):
+                # Ensure we have a valid URL and title
+                if entry.get('url') and entry.get('title'):
+                    results.append({
+                        'title': entry.get('title'),
+                        'url': entry.get('url'),
+                        'duration': entry.get('duration')
+                    })
+            return results
+    except Exception as e:
+        logging.error(f"Search error: {e}")
+        return []
 
 def parse_time(time_str: str) -> float:
     """Parses time string (e.g., '1:30', '10:00:00', '45') to seconds."""
@@ -79,26 +113,7 @@ async def cmd_start(message: types.Message):
         "Отправь мне название песни или ссылку на YouTube, и я пришлю тебе аудио."
     )
 
-@dp.message(F.text)
-async def handle_text(message: types.Message):
-    text = message.text.strip()
-
-    # Try to extract time range like "10:00-15:30" or "01:00:00-01:05:00" from the end of the string
-    time_range_match = re.search(r'\s+([\d:]+)-([\d:]+)$', text)
-
-    start_time = None
-    end_time = None
-    query = text
-
-    if time_range_match:
-        try:
-            start_time = parse_time(time_range_match.group(1))
-            end_time = parse_time(time_range_match.group(2))
-            # Remove the time range part from the query
-            query = text[:time_range_match.start()].strip()
-        except ValueError:
-            pass # fallback to full download if time parsing fails
-
+async def process_download(message: types.Message, query: str, start_time: float = None, end_time: float = None, is_callback: bool = False):
     msg = await message.answer("Ищу и скачиваю музыку, пожалуйста, подождите...")
 
     loop = asyncio.get_running_loop()
@@ -134,6 +149,73 @@ async def handle_text(message: types.Message):
                         await asyncio.sleep(1) # wait for process to release file lock
                     else:
                         logging.error(f"Failed to remove file {f} after 3 attempts: {e}")
+
+@dp.message(F.text)
+async def handle_text(message: types.Message):
+    text = message.text.strip()
+
+    # Try to extract time range like "10:00-15:30" or "01:00:00-01:05:00" from the end of the string
+    time_range_match = re.search(r'\s+([\d:]+)-([\d:]+)$', text)
+
+    start_time = None
+    end_time = None
+    query = text
+
+    if time_range_match:
+        try:
+            start_time = parse_time(time_range_match.group(1))
+            end_time = parse_time(time_range_match.group(2))
+            # Remove the time range part from the query
+            query = text[:time_range_match.start()].strip()
+        except ValueError:
+            pass # fallback to full download if time parsing fails
+
+    query_lower = query.lower()
+    is_url = query_lower.startswith('http://') or query_lower.startswith('https://')
+
+    if is_url:
+        # Direct URL download
+        await process_download(message, query, start_time, end_time)
+    else:
+        # Text search
+        msg = await message.answer("Ищу треки, пожалуйста, подождите...")
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(None, search_youtube, query)
+
+        if not results:
+            await msg.edit_text("Ничего не найдено по вашему запросу. Попробуйте по-другому.")
+            return
+
+        buttons = []
+        for res in results:
+            title = res['title']
+            # Limit title length to prevent Telegram API errors
+            if len(title) > 40:
+                title = title[:37] + "..."
+            duration = format_duration(res['duration'])
+            btn_text = f"🎵 {title} ({duration})"
+            # We use a custom prefix "dl|" followed by the URL to handle callbacks
+            # Ensure callback_data is <= 64 bytes (URL usually fits, but we can just use the video ID)
+            video_id = res['url'].split('v=')[-1][:11] if 'v=' in res['url'] else res['url'][:20]
+            cb_data = f"dl|{video_id}"
+            buttons.append([InlineKeyboardButton(text=btn_text, callback_data=cb_data)])
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await msg.edit_text("Выберите трек из списка ниже:", reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith('dl|'))
+async def handle_download_callback(callback: types.CallbackQuery):
+    video_id = callback.data.split('|')[1]
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # Acknowledge the callback
+    await callback.answer()
+
+    # Update the original message to show progress and remove the keyboard
+    await callback.message.edit_text(f"Вы выбрали трек. Начинаю загрузку...", reply_markup=None)
+
+    # Start the download process
+    await process_download(callback.message, url, is_callback=True)
 
 async def main():
     if not BOT_TOKEN:
