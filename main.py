@@ -230,7 +230,7 @@ async def handle_text(message: types.Message):
             # Use the explicit id from yt-dlp to avoid string splitting bugs
             # Limit id to 20 chars to safely fit within Telegram's 64 byte limit
             video_id = str(res['id'])[:20]
-            cb_data = f"dl|{video_id}"
+            cb_data = f"dl|{video_id}|{start_time}|{end_time}"
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=cb_data)])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -238,7 +238,18 @@ async def handle_text(message: types.Message):
 
 @dp.callback_query(F.data.startswith('dl|'))
 async def handle_download_callback(callback: types.CallbackQuery):
-    video_id = callback.data.split('|')[1]
+    parts = callback.data.split('|')
+    video_id = parts[1]
+
+    start_time = None
+    end_time = None
+
+    if len(parts) >= 4:
+        if parts[2] != 'None':
+            start_time = float(parts[2])
+        if parts[3] != 'None':
+            end_time = float(parts[3])
+
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     # Acknowledge the callback
@@ -248,7 +259,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
     await callback.message.edit_text(f"Вы выбрали трек. Начинаю загрузку...", reply_markup=None)
 
     # Start the download process
-    await process_download(callback.message, url, is_callback=True)
+    await process_download(callback.message, url, start_time, end_time, is_callback=True)
 
 async def main():
     if not BOT_TOKEN:
