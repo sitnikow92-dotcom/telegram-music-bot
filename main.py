@@ -102,18 +102,19 @@ async def handle_text(message: types.Message):
         filepath, title = await loop.run_in_executor(None, download_audio, query, start_time, end_time)
 
         if filepath and os.path.exists(filepath):
-            file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
-            if file_size_mb > 50:
-                await msg.edit_text("Извините, аудио слишком длинное. Лимит Telegram — 50 МБ (около 35 минут).")
-            else:
-                await msg.delete()
-                audio = FSInputFile(filepath)
-                await message.answer_audio(audio=audio, caption=title)
-
             try:
-                os.remove(filepath)
-            except OSError as e:
-                logging.error(f"Error removing file {filepath}: {e}")
+                file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+                if file_size_mb > 50:
+                    await msg.edit_text("Извините, аудио слишком длинное. Лимит Telegram — 50 МБ (около 35 минут).")
+                else:
+                    await msg.delete()
+                    audio = FSInputFile(filepath)
+                    await message.answer_audio(audio=audio, caption=title)
+            finally:
+                try:
+                    os.remove(filepath)
+                except OSError as e:
+                    logging.error(f"Error removing file {filepath}: {e}")
         else:
             await msg.edit_text("Не удалось найти или скачать музыку. Попробуйте изменить запрос.")
 
