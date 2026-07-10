@@ -163,7 +163,7 @@ async def process_download(message: types.Message, query: str, start_time: float
                 await msg.delete()
                 await message.bot.send_chat_action(chat_id=message.chat.id, action="upload_document")
                 audio = FSInputFile(filepath)
-                await message.answer_audio(audio=audio, caption=title)
+                await message.bot.send_audio(chat_id=message.chat.id, audio=audio, caption=title)
         else:
             await msg.edit_text("Не удалось найти или скачать музыку. Попробуйте изменить запрос.")
 
