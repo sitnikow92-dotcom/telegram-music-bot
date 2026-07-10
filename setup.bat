@@ -1,12 +1,11 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0"
 
 echo ==============================================
-echo Установка и настройка окружения для Telegram-бота
+echo Telegram Bot Setup
 echo ==============================================
 
-:: Проверка наличия системного лаунчера py (помогает обойти заглушки Microsoft Store)
+:: Check for py launcher (bypasses Windows Store python stubs)
 py --version >nul 2>&1
 if %errorlevel% equ 0 (
     set "PYTHON_CMD=py"
@@ -14,48 +13,48 @@ if %errorlevel% equ 0 (
     set "PYTHON_CMD=python"
 )
 
-echo [1/3] Проверка виртуального окружения (venv)...
+echo [1/3] Checking virtual environment (venv)...
 if not exist "venv" (
-    echo Виртуальное окружение не найдено. Создаем...
+    echo Virtual environment not found. Creating...
     %PYTHON_CMD% -m venv venv
     if errorlevel 1 (
-        echo Ошибка при создании виртуального окружения. Убедитесь, что Python установлен.
+        echo Failed to create virtual environment. Please ensure Python is installed.
         pause
         exit /b 1
     )
 ) else (
-    echo Виртуальное окружение уже существует.
+    echo Virtual environment already exists.
 )
 
-echo [2/3] Обновление менеджера пакетов pip...
+echo [2/3] Upgrading pip...
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 
-echo [3/3] Установка зависимостей из requirements.txt...
+echo [3/3] Installing dependencies from requirements.txt...
 if exist "requirements.txt" (
     pip install -r requirements.txt
 ) else (
-    echo Файл requirements.txt не найден!
+    echo requirements.txt not found!
     pause
     exit /b 1
 )
 
 echo.
-echo Настройка файла .env...
+echo Setting up .env file...
 if not exist ".env" (
     if exist ".env.example" (
         copy .env.example .env >nul
-        echo Файл .env успешно создан из шаблона.
+        echo .env file successfully created from template.
     ) else (
-        echo ВНИМАНИЕ: Файл .env.example не найден. Вам нужно создать файл .env вручную.
+        echo WARNING: .env.example not found. You need to create .env manually.
     )
 ) else (
-    echo Файл .env уже существует.
+    echo .env file already exists.
 )
 
 echo.
 echo ==============================================
-echo Настройка завершена успешно!
-echo Теперь вы можете запустить бота двойным кликом по start.bat
+echo Setup completed successfully!
+echo You can now run the bot by double-clicking start.bat
 echo ==============================================
 pause

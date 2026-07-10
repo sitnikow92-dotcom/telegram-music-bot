@@ -1,28 +1,27 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0"
 
 echo ==============================================
-echo Запуск Telegram-бота
+echo Starting Telegram Bot
 echo ==============================================
 
-:: Проверка наличия виртуального окружения
+:: Check for virtual environment
 if not exist "venv\Scripts\activate.bat" (
-    echo [КРИТИЧЕСКАЯ ОШИБКА] Окружение не настроено!
-    echo Пожалуйста, сначала запустите файл setup.bat
+    echo [CRITICAL ERROR] Environment is not configured!
+    echo Please run setup.bat first.
     pause
     exit /b 1
 )
 
-:: Проверка конфигурационного файла
+:: Check for configuration file
 if not exist ".env" (
-    echo [ВНИМАНИЕ] Файл .env не найден!
-    echo Если бот не запустится, скопируйте .env.example в .env и укажите свой BOT_TOKEN.
+    echo [WARNING] .env file not found!
+    echo If the bot fails to start, make sure to copy .env.example to .env and set your BOT_TOKEN.
     echo.
 )
 
-:: Запуск бота через виртуальное окружение
-echo Активация окружения и запуск main.py...
+:: Run the bot via the virtual environment
+echo Activating environment and running main.py...
 call venv\Scripts\activate.bat
 python main.py
 
