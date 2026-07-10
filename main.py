@@ -27,11 +27,12 @@ dp = Dispatcher()
 # Глобальный словарь для кэширования длинных URL (обход лимита 64 байта в callback_data)
 SEARCH_CACHE = {}
 
-def format_duration(seconds: int) -> str:
+def format_duration(seconds) -> str:
     """Форматирует длительность в секундах в строку формата ММ:СС или ЧЧ:ММ:СС."""
     if not seconds:
         return "Неизвестно"
-    m, s = divmod(seconds, 60)
+    # Приводим к int, так как SoundCloud может возвращать float, а :02d требует целых чисел.
+    m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     if h > 0:
         return f"{h}:{m:02d}:{s:02d}"
@@ -312,12 +313,15 @@ async def main():
     session = None
     if PROXY_URL:
         try:
-            from aiohttp_socks import ProxyConnector
-            connector = ProxyConnector.from_url(PROXY_URL)
-            session = AiohttpSession(connector=connector)
+            if PROXY_URL.startswith("socks"):
+                from aiohttp_socks import ProxyConnector
+                connector = ProxyConnector.from_url(PROXY_URL)
+                session = AiohttpSession(connector=connector)
+            else:
+                session = AiohttpSession(proxy=PROXY_URL)
             logging.info(f"Using proxy: {PROXY_URL}")
         except ImportError:
-            logging.error("aiohttp_socks is not installed. Please run `pip install aiohttp_socks` to use proxy.")
+            logging.error("aiohttp_socks is not installed. Please run `pip install aiohttp_socks` to use SOCKS proxy.")
 
     bot = Bot(token=BOT_TOKEN, session=session)
     logging.info("Starting bot...")
