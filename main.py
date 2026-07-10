@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 import re
+import time
 import uuid
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters.command import Command
@@ -55,6 +56,12 @@ def search_youtube(query: str):
         logging.error(f"Search error: {e}")
         return []
 
+def create_progress_bar(percent: float, length: int = 10) -> str:
+    """Creates a visual progress bar like [████░░░░░░]"""
+    filled_length = int(length * percent // 100)
+    bar = '█' * filled_length + '░' * (length - filled_length)
+    return f"[{bar}] {percent:.1f}%"
+
 def parse_time(time_str: str) -> float:
     """Parses time string (e.g., '1:30', '10:00:00', '45') to seconds."""
     parts = list(map(float, time_str.split(':')))
@@ -64,7 +71,7 @@ def parse_time(time_str: str) -> float:
         return parts[0] * 60 + parts[1]
     return parts[0]
 
-def download_audio(file_id: str, query: str, start_time: float = None, end_time: float = None):
+def download_audio(file_id: str, query: str, start_time: float = None, end_time: float = None, progress_hook=None):
     """
     Downloads audio using yt_dlp and returns the filepath and title.
     """
@@ -81,6 +88,9 @@ def download_audio(file_id: str, query: str, start_time: float = None, end_time:
         'default_search': 'ytsearch1',
         'match_filter': match_filter_func('!is_live')
     }
+
+    if progress_hook:
+        ydl_opts['progress_hooks'] = [progress_hook]
 
     if start_time is not None and end_time is not None:
         ydl_opts['external_downloader'] = 'ffmpeg'
@@ -119,8 +129,31 @@ async def process_download(message: types.Message, query: str, start_time: float
     loop = asyncio.get_running_loop()
     file_id = str(uuid.uuid4())
 
+    last_update_time = [time.time()]
+
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            try:
+                # _percent_str can contain ANSI escape codes, so we strip them
+                percent_str = re.sub(r'\x1b\[[0-9;]*m', '', d.get('_percent_str', '0.0%'))
+                percent_str = percent_str.replace('%', '').strip()
+                percent = float(percent_str)
+
+                # Throttle updates to max 1 per 2 seconds to avoid Telegram rate limits
+                current_time = time.time()
+                if current_time - last_update_time[0] > 2.0:
+                    last_update_time[0] = current_time
+                    bar = create_progress_bar(percent)
+                    # Use run_coroutine_threadsafe since this hook is called from the executor thread
+                    asyncio.run_coroutine_threadsafe(
+                        msg.edit_text(f"Скачивание: {bar}\nПожалуйста, подождите..."),
+                        loop
+                    )
+            except Exception as e:
+                pass # Ignore parsing errors for progress to not interrupt download
+
     try:
-        filepath, title = await loop.run_in_executor(None, download_audio, file_id, query, start_time, end_time)
+        filepath, title = await loop.run_in_executor(None, download_audio, file_id, query, start_time, end_time, progress_hook)
 
         if filepath and os.path.exists(filepath):
             file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
