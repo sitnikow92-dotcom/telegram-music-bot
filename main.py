@@ -1,4 +1,5 @@
 import asyncio
+import glob
 import logging
 import os
 import re
@@ -28,11 +29,10 @@ def parse_time(time_str: str) -> float:
         return parts[0] * 60 + parts[1]
     return parts[0]
 
-def download_audio(query: str, start_time: float = None, end_time: float = None):
+def download_audio(file_id: str, query: str, start_time: float = None, end_time: float = None):
     """
     Downloads audio using yt_dlp and returns the filepath and title.
     """
-    file_id = str(uuid.uuid4())
     ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
@@ -99,29 +99,32 @@ async def handle_text(message: types.Message):
     msg = await message.answer("Ищу и скачиваю музыку, пожалуйста, подождите...")
 
     loop = asyncio.get_running_loop()
+    file_id = str(uuid.uuid4())
+
     try:
-        filepath, title = await loop.run_in_executor(None, download_audio, query, start_time, end_time)
+        filepath, title = await loop.run_in_executor(None, download_audio, file_id, query, start_time, end_time)
 
         if filepath and os.path.exists(filepath):
-            try:
-                file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
-                if file_size_mb > 50:
-                    await msg.edit_text("Извините, аудио слишком длинное. Лимит Telegram — 50 МБ (около 35 минут).")
-                else:
-                    await msg.delete()
-                    audio = FSInputFile(filepath)
-                    await message.answer_audio(audio=audio, caption=title)
-            finally:
-                try:
-                    os.remove(filepath)
-                except OSError as e:
-                    logging.error(f"Error removing file {filepath}: {e}")
+            file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            if file_size_mb > 50:
+                await msg.edit_text("Извините, аудио слишком длинное. Лимит Telegram — 50 МБ (около 35 минут).")
+            else:
+                await msg.delete()
+                audio = FSInputFile(filepath)
+                await message.answer_audio(audio=audio, caption=title)
         else:
             await msg.edit_text("Не удалось найти или скачать музыку. Попробуйте изменить запрос.")
 
     except Exception as e:
         logging.error(f"Handler error: {e}")
         await msg.edit_text("Произошла непредвиденная ошибка. Пожалуйста, попробуйте позже.")
+    finally:
+        # Guarantee removal of all files related to this file_id (e.g. .mp3, .webm, .part)
+        for f in glob.glob(f"{file_id}.*"):
+            try:
+                os.remove(f)
+            except OSError as e:
+                logging.error(f"Error removing file {f}: {e}")
 
 async def main():
     if not BOT_TOKEN:
