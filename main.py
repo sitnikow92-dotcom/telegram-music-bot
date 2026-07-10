@@ -22,6 +22,9 @@ logging.basicConfig(level=logging.INFO)
 # Инициализация диспетчера для обработки входящих сообщений
 dp = Dispatcher()
 
+# Глобальный словарь для кэширования длинных URL (обход лимита 64 байта в callback_data)
+SEARCH_CACHE = {}
+
 def format_duration(seconds: int) -> str:
     """Форматирует длительность в секундах в строку формата ММ:СС или ЧЧ:ММ:СС."""
     if not seconds:
@@ -32,29 +35,39 @@ def format_duration(seconds: int) -> str:
         return f"{h}:{m:02d}:{s:02d}"
     return f"{m}:{s:02d}"
 
-def search_youtube(query: str):
-    """Ищет видео на YouTube и возвращает список из топ-5 результатов."""
+def search_music(query: str):
+    """Ищет треки на нескольких платформах (YT + SoundCloud) и объединяет результаты."""
     ydl_opts = {
         'extract_flat': True,
         'quiet': True,
         'match_filter': match_filter_func('!is_live') # Игнорируем прямые трансляции (стримы)
     }
+    results = []
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Ищем 5 первых результатов без фактического скачивания (download=False)
-            info = ydl.extract_info(f"ytsearch5:{query}", download=False)
-            results = []
-            for entry in info.get('entries', []):
-                # Убеждаемся, что у результата есть валидный ID и название
-                if entry.get('id') and entry.get('title'):
+            # 1. Ищем 3 трека на YouTube
+            info_yt = ydl.extract_info(f"ytsearch3:{query}", download=False)
+            for entry in info_yt.get('entries', []):
+                if entry.get('url') or entry.get('id'):
+                    url = entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
                     results.append({
-                        'title': entry.get('title'),
-                        'id': entry.get('id'),
+                        'title': f"[YT] {entry.get('title')}",
+                        'url': url,
+                        'duration': entry.get('duration')
+                    })
+
+            # 2. Ищем 2 трека в SoundCloud
+            info_sc = ydl.extract_info(f"scsearch2:{query}", download=False)
+            for entry in info_sc.get('entries', []):
+                if entry.get('url'):
+                    results.append({
+                        'title': f"[SC] {entry.get('title')}",
+                        'url': entry.get('url'),
                         'duration': entry.get('duration')
                     })
             return results
     except Exception as e:
-        logging.error(f"Ошибка поиска: {e}")
+        logging.error(f"Ошибка мульти-поиска: {e}")
         return []
 
 def create_progress_bar(percent: float, length: int = 10) -> str:
@@ -225,10 +238,10 @@ async def handle_text(message: types.Message):
         # Скачиваем напрямую, если отправлена прямая ссылка
         await process_download(message, query, start_time, end_time)
     else:
-        # Если это текст — ищем видео на YouTube
+        # Если это текст — ищем треки на мульти-платформах
         msg = await message.answer("Ищу треки, пожалуйста, подождите...")
         loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(None, search_youtube, query)
+        results = await loop.run_in_executor(None, search_music, query)
 
         if not results:
             await msg.edit_text("Ничего не найдено по вашему запросу. Попробуйте по-другому.")
@@ -243,12 +256,16 @@ async def handle_text(message: types.Message):
             duration = format_duration(res['duration'])
             btn_text = f"🎵 {title} ({duration})"
 
-            # Используем явный ID от yt-dlp, чтобы избежать багов с парсингом ссылок
-            # Ограничиваем ID до 20 символов, чтобы гарантированно вписаться в 64-байтный лимит Telegram для callback_data
-            video_id = str(res['id'])[:20]
+            # Генерируем короткий ID для кэша (8 символов)
+            short_id = str(uuid.uuid4())[:8]
+            # Сохраняем реальную ссылку (любой платформы) в память бота
+            SEARCH_CACHE[short_id] = res['url']
+
             st_str = str(start_time) if start_time is not None else ""
             et_str = str(end_time) if end_time is not None else ""
-            cb_data = f"dl|{video_id}|{st_str}|{et_str}"
+
+            # В callback передаем только short_id. Теперь мы на 100% вписываемся в лимиты!
+            cb_data = f"dl|{short_id}|{st_str}|{et_str}"
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=cb_data)])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -258,7 +275,13 @@ async def handle_text(message: types.Message):
 async def handle_download_callback(callback: types.CallbackQuery):
     # Разбираем данные, пришедшие с нажатой кнопки
     parts = callback.data.split('|')
-    video_id = parts[1]
+    short_id = parts[1]
+
+    # Достаем ссылку любой платформы из памяти
+    url = SEARCH_CACHE.get(short_id)
+    if not url:
+        await callback.answer("Ошибка: ссылка устарела или бот был перезагружен.", show_alert=True)
+        return
 
     start_time = None
     end_time = None
@@ -269,8 +292,6 @@ async def handle_download_callback(callback: types.CallbackQuery):
             start_time = float(parts[2])
         if parts[3]:
             end_time = float(parts[3])
-
-    url = f"https://www.youtube.com/watch?v={video_id}"
 
     # Подтверждаем получение callback_query, чтобы у пользователя пропали "часики" на кнопке
     await callback.answer()
