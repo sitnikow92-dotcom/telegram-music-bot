@@ -17,9 +17,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 
-# Initialize bot and dispatcher
-if BOT_TOKEN:
-    bot = Bot(token=BOT_TOKEN)
+# Initialize dispatcher
 dp = Dispatcher()
 
 def parse_time(time_str: str) -> float:
@@ -128,6 +126,7 @@ async def main():
         logging.error("BOT_TOKEN is not set in .env file.")
         return
 
+    bot = Bot(token=BOT_TOKEN)
     logging.info("Starting bot...")
     await dp.start_polling(bot)
 
