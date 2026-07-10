@@ -121,10 +121,15 @@ async def handle_text(message: types.Message):
     finally:
         # Guarantee removal of all files related to this file_id (e.g. .mp3, .webm, .part)
         for f in glob.glob(f"{file_id}.*"):
-            try:
-                os.remove(f)
-            except OSError as e:
-                logging.error(f"Error removing file {f}: {e}")
+            for attempt in range(3):
+                try:
+                    os.remove(f)
+                    break # successfully removed
+                except OSError as e:
+                    if attempt < 2:
+                        await asyncio.sleep(1) # wait for process to release file lock
+                    else:
+                        logging.error(f"Failed to remove file {f} after 3 attempts: {e}")
 
 async def main():
     if not BOT_TOKEN:
