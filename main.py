@@ -8,6 +8,7 @@ import uuid
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters.command import Command
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.client.session.aiohttp import AiohttpSession
 from dotenv import load_dotenv
 import yt_dlp
 from yt_dlp.utils import match_filter_func
@@ -15,6 +16,7 @@ from yt_dlp.utils import match_filter_func
 # Загрузка переменных окружения из файла .env
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+PROXY_URL = os.getenv("PROXY_URL")
 
 # Настройка логирования для отслеживания ошибок и статусов
 logging.basicConfig(level=logging.INFO)
@@ -307,7 +309,17 @@ async def main():
         logging.error("BOT_TOKEN is not set in .env file.")
         return
 
-    bot = Bot(token=BOT_TOKEN)
+    session = None
+    if PROXY_URL:
+        try:
+            from aiohttp_socks import ProxyConnector
+            connector = ProxyConnector.from_url(PROXY_URL)
+            session = AiohttpSession(connector=connector)
+            logging.info(f"Using proxy: {PROXY_URL}")
+        except ImportError:
+            logging.error("aiohttp_socks is not installed. Please run `pip install aiohttp_socks` to use proxy.")
+
+    bot = Bot(token=BOT_TOKEN, session=session)
     logging.info("Starting bot...")
     await dp.start_polling(bot)
 

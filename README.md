@@ -21,6 +21,10 @@
    ```
    BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
    ```
+4. **Если Telegram заблокирован** в вашей стране (ошибка `Cannot connect to host api.telegram.org` или `Таймаут семафора`), добавьте в этот же файл строку с прокси:
+   ```
+   PROXY_URL=socks5://user:password@127.0.0.1:1080
+   ```
 
 ### 3. Установка зависимостей и Запуск
 
