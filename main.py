@@ -230,7 +230,9 @@ async def handle_text(message: types.Message):
             # Use the explicit id from yt-dlp to avoid string splitting bugs
             # Limit id to 20 chars to safely fit within Telegram's 64 byte limit
             video_id = str(res['id'])[:20]
-            cb_data = f"dl|{video_id}|{start_time}|{end_time}"
+            st_str = str(start_time) if start_time is not None else ""
+            et_str = str(end_time) if end_time is not None else ""
+            cb_data = f"dl|{video_id}|{st_str}|{et_str}"
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=cb_data)])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -245,9 +247,9 @@ async def handle_download_callback(callback: types.CallbackQuery):
     end_time = None
 
     if len(parts) >= 4:
-        if parts[2] != 'None':
+        if parts[2]:
             start_time = float(parts[2])
-        if parts[3] != 'None':
+        if parts[3]:
             end_time = float(parts[3])
 
     url = f"https://www.youtube.com/watch?v={video_id}"
