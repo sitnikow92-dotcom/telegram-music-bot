@@ -11,7 +11,7 @@ from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButto
 from aiogram.client.session.aiohttp import AiohttpSession
 from dotenv import load_dotenv
 import yt_dlp
-from yt_dlp.utils import match_filter_func
+from yt_dlp.utils import match_filter_func, download_range_func
 
 # Загрузка переменных окружения из файла .env
 load_dotenv()
@@ -43,8 +43,9 @@ def search_music(query: str):
     ydl_opts = {
         'extract_flat': True,
         'quiet': True,
-        'match_filter': match_filter_func('!is_live') # Игнорируем прямые трансляции (стримы)
     }
+    if PROXY_URL:
+        ydl_opts['proxy'] = PROXY_URL
     results = []
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -105,17 +106,16 @@ def download_audio(file_id: str, query: str, start_time: float = None, end_time:
         'default_search': 'ytsearch1',
         'match_filter': match_filter_func('!is_live')
     }
+    if PROXY_URL:
+        ydl_opts['proxy'] = PROXY_URL
 
     if progress_hook:
         ydl_opts['progress_hooks'] = [progress_hook] # Добавляем функцию для перехвата прогресса загрузки
 
     if start_time is not None and end_time is not None:
-        # Если переданы таймкоды, используем ffmpeg для скачивания конкретного куска,
-        # чтобы не загружать видео целиком.
-        ydl_opts['external_downloader'] = 'ffmpeg'
-        ydl_opts['external_downloader_args'] = {
-            'ffmpeg_i': ['-ss', str(start_time), '-to', str(end_time)]
-        }
+        # Используем download_range_func для скачивания только нужного фрагмента,
+        # что экономит трафик и место, избегая скачивания всего видео целиком.
+        ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -310,20 +310,17 @@ async def main():
         logging.error("BOT_TOKEN is not set in .env file.")
         return
 
-    session = None
+    # Если в .env прописан прокси, используем его, иначе запускаем напрямую
+    # Если в .env прописан прокси, инициализируем сессию aiogram
     if PROXY_URL:
-        try:
-            if PROXY_URL.startswith("socks"):
-                from aiohttp_socks import ProxyConnector
-                connector = ProxyConnector.from_url(PROXY_URL)
-                session = AiohttpSession(connector=connector)
-            else:
-                session = AiohttpSession(proxy=PROXY_URL)
-            logging.info(f"Using proxy: {PROXY_URL}")
-        except ImportError:
-            logging.error("aiohttp_socks is not installed. Please run `pip install aiohttp_socks` to use SOCKS proxy.")
+        logging.info(f"Инициализируем сессию через прокси из .env: {PROXY_URL}")
+        # aiogram версии 3.x нативно поддерживает aiohttp_socks, достаточно просто передать proxy=
+        session = AiohttpSession(proxy=PROXY_URL)
+        bot = Bot(token=BOT_TOKEN, session=session)
+    else:
+        logging.info("Запуск без прокси...")
+        bot = Bot(token=BOT_TOKEN)
 
-    bot = Bot(token=BOT_TOKEN, session=session)
     logging.info("Starting bot...")
     await dp.start_polling(bot)
 
