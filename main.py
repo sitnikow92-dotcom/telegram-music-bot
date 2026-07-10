@@ -44,11 +44,11 @@ def search_youtube(query: str):
             info = ydl.extract_info(f"ytsearch5:{query}", download=False)
             results = []
             for entry in info.get('entries', []):
-                # Ensure we have a valid URL and title
-                if entry.get('url') and entry.get('title'):
+                # Ensure we have a valid ID and title
+                if entry.get('id') and entry.get('title'):
                     results.append({
                         'title': entry.get('title'),
-                        'url': entry.get('url'),
+                        'id': entry.get('id'),
                         'duration': entry.get('duration')
                     })
             return results
@@ -227,9 +227,9 @@ async def handle_text(message: types.Message):
                 title = title[:37] + "..."
             duration = format_duration(res['duration'])
             btn_text = f"🎵 {title} ({duration})"
-            # We use a custom prefix "dl|" followed by the URL to handle callbacks
-            # Ensure callback_data is <= 64 bytes (URL usually fits, but we can just use the video ID)
-            video_id = res['url'].split('v=')[-1][:11] if 'v=' in res['url'] else res['url'][:20]
+            # Use the explicit id from yt-dlp to avoid string splitting bugs
+            # Limit id to 20 chars to safely fit within Telegram's 64 byte limit
+            video_id = str(res['id'])[:20]
             cb_data = f"dl|{video_id}"
             buttons.append([InlineKeyboardButton(text=btn_text, callback_data=cb_data)])
 
