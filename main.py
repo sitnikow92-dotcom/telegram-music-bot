@@ -8,7 +8,6 @@ from aiogram.filters.command import Command
 from aiogram.types import FSInputFile
 from dotenv import load_dotenv
 import yt_dlp
-from yt_dlp.utils import download_range_func
 
 # Load environment variables
 load_dotenv()
@@ -48,8 +47,10 @@ def download_audio(query: str, start_time: float = None, end_time: float = None)
     }
 
     if start_time is not None and end_time is not None:
-        ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
-        ydl_opts['force_keyframes_at_cuts'] = True
+        ydl_opts['external_downloader'] = 'ffmpeg'
+        ydl_opts['external_downloader_args'] = {
+            'ffmpeg_i': ['-ss', str(start_time), '-to', str(end_time)]
+        }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
