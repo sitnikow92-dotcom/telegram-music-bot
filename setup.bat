@@ -41,6 +41,19 @@ if exist "requirements.txt" (
 )
 
 echo.
+echo Настройка файла .env...
+if not exist ".env" (
+    if exist ".env.example" (
+        copy .env.example .env >nul
+        echo Файл .env успешно создан из шаблона.
+    ) else (
+        echo ВНИМАНИЕ: Файл .env.example не найден. Вам нужно создать файл .env вручную.
+    )
+) else (
+    echo Файл .env уже существует.
+)
+
+echo.
 echo ==============================================
 echo Настройка завершена успешно!
 echo Теперь вы можете запустить бота двойным кликом по start.bat
