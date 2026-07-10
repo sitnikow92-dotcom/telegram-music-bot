@@ -12,20 +12,20 @@ from dotenv import load_dotenv
 import yt_dlp
 from yt_dlp.utils import match_filter_func
 
-# Load environment variables
+# Загрузка переменных окружения из файла .env
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Setup logging
+# Настройка логирования для отслеживания ошибок и статусов
 logging.basicConfig(level=logging.INFO)
 
-# Initialize dispatcher
+# Инициализация диспетчера для обработки входящих сообщений
 dp = Dispatcher()
 
 def format_duration(seconds: int) -> str:
-    """Formats duration in seconds to MM:SS or HH:MM:SS."""
+    """Форматирует длительность в секундах в строку формата ММ:СС или ЧЧ:ММ:СС."""
     if not seconds:
-        return "Unknown"
+        return "Неизвестно"
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
     if h > 0:
@@ -33,18 +33,19 @@ def format_duration(seconds: int) -> str:
     return f"{m}:{s:02d}"
 
 def search_youtube(query: str):
-    """Searches YouTube and returns a list of top 5 videos."""
+    """Ищет видео на YouTube и возвращает список из топ-5 результатов."""
     ydl_opts = {
         'extract_flat': True,
         'quiet': True,
-        'match_filter': match_filter_func('!is_live')
+        'match_filter': match_filter_func('!is_live') # Игнорируем прямые трансляции (стримы)
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Ищем 5 первых результатов без фактического скачивания (download=False)
             info = ydl.extract_info(f"ytsearch5:{query}", download=False)
             results = []
             for entry in info.get('entries', []):
-                # Ensure we have a valid ID and title
+                # Убеждаемся, что у результата есть валидный ID и название
                 if entry.get('id') and entry.get('title'):
                     results.append({
                         'title': entry.get('title'),
@@ -53,17 +54,17 @@ def search_youtube(query: str):
                     })
             return results
     except Exception as e:
-        logging.error(f"Search error: {e}")
+        logging.error(f"Ошибка поиска: {e}")
         return []
 
 def create_progress_bar(percent: float, length: int = 10) -> str:
-    """Creates a visual progress bar like [████░░░░░░]"""
+    """Создает визуальный прогресс-бар в виде [████░░░░░░]"""
     filled_length = int(length * percent // 100)
     bar = '█' * filled_length + '░' * (length - filled_length)
     return f"[{bar}] {percent:.1f}%"
 
 def parse_time(time_str: str) -> float:
-    """Parses time string (e.g., '1:30', '10:00:00', '45') to seconds."""
+    """Парсит строку времени (например, '1:30', '10:00:00', '45') и переводит в секунды."""
     parts = list(map(float, time_str.split(':')))
     if len(parts) == 3:
         return parts[0] * 3600 + parts[1] * 60 + parts[2]
@@ -73,7 +74,7 @@ def parse_time(time_str: str) -> float:
 
 def download_audio(file_id: str, query: str, start_time: float = None, end_time: float = None, progress_hook=None):
     """
-    Downloads audio using yt_dlp and returns the filepath and title.
+    Скачивает аудио с помощью yt_dlp и возвращает путь к сохраненному файлу и название.
     """
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -90,9 +91,11 @@ def download_audio(file_id: str, query: str, start_time: float = None, end_time:
     }
 
     if progress_hook:
-        ydl_opts['progress_hooks'] = [progress_hook]
+        ydl_opts['progress_hooks'] = [progress_hook] # Добавляем функцию для перехвата прогресса загрузки
 
     if start_time is not None and end_time is not None:
+        # Если переданы таймкоды, используем ffmpeg для скачивания конкретного куска,
+        # чтобы не загружать видео целиком.
         ydl_opts['external_downloader'] = 'ffmpeg'
         ydl_opts['external_downloader_args'] = {
             'ffmpeg_i': ['-ss', str(start_time), '-to', str(end_time)]
@@ -101,6 +104,7 @@ def download_audio(file_id: str, query: str, start_time: float = None, end_time:
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             query_lower = query.lower()
+            # Если запрос не является прямой ссылкой, формируем запрос для поиска на YouTube (ytsearch1)
             if not query_lower.startswith('http://') and not query_lower.startswith('https://'):
                 search_query = f"ytsearch1:{query}"
             else:
@@ -108,12 +112,13 @@ def download_audio(file_id: str, query: str, start_time: float = None, end_time:
 
             info = ydl.extract_info(search_query, download=True)
 
+            # Если вернулся список (плейлист или результаты поиска), берем первый элемент
             if 'entries' in info:
                 info = info['entries'][0]
 
-            return f"{file_id}.mp3", info.get('title', 'Unknown Title')
+            return f"{file_id}.mp3", info.get('title', 'Неизвестный трек')
     except Exception as e:
-        logging.error(f"Error downloading {query}: {e}")
+        logging.error(f"Ошибка при скачивании {query}: {e}")
         return None, None
 
 @dp.message(Command("start"))
@@ -129,38 +134,46 @@ async def process_download(message: types.Message, query: str, start_time: float
     loop = asyncio.get_running_loop()
     file_id = str(uuid.uuid4())
 
+    # Храним время последнего обновления в списке (чтобы изменять его внутри вложенной функции)
     last_update_time = [time.time()]
 
     def progress_hook(d):
+        """Хук, который вызывается во время скачивания для обновления прогресс-бара."""
         if d['status'] == 'downloading':
             try:
-                # _percent_str can contain ANSI escape codes, so we strip them
+                # В _percent_str могут быть ANSI escape-коды для цвета, очищаем их регуляркой
                 percent_str = re.sub(r'\x1b\[[0-9;]*m', '', d.get('_percent_str', '0.0%'))
                 percent_str = percent_str.replace('%', '').strip()
                 percent = float(percent_str)
 
-                # Throttle updates to max 1 per 2 seconds to avoid Telegram rate limits
+                # Троттлинг (ограничение частоты): обновляем сообщение не чаще 1 раза в 2 секунды,
+                # чтобы Telegram API не заблокировал бота за флуд.
                 current_time = time.time()
                 if current_time - last_update_time[0] > 2.0:
                     last_update_time[0] = current_time
                     bar = create_progress_bar(percent)
-                    # Use run_coroutine_threadsafe since this hook is called from the executor thread
+                    # Используем run_coroutine_threadsafe, так как этот хук вызывается из синхронного потока (executor thread),
+                    # а редактирование сообщения должно произойти в главном асинхронном цикле.
                     asyncio.run_coroutine_threadsafe(
                         msg.edit_text(f"Скачивание: {bar}\nПожалуйста, подождите..."),
                         loop
                     )
             except Exception as e:
-                pass # Ignore parsing errors for progress to not interrupt download
+                pass # Игнорируем ошибки парсинга прогресса, чтобы не прерывать само скачивание
 
     try:
+        # Запускаем синхронную функцию скачивания в отдельном потоке (executor),
+        # чтобы бот не "зависал" для других пользователей на время загрузки.
         filepath, title = await loop.run_in_executor(None, download_audio, file_id, query, start_time, end_time, progress_hook)
 
         if filepath and os.path.exists(filepath):
+            # Проверяем размер файла (в мегабайтах) перед отправкой
             file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
             if file_size_mb > 50:
                 await msg.edit_text("Извините, аудио слишком длинное. Лимит Telegram — 50 МБ (около 35 минут).")
             else:
                 await msg.delete()
+                # Отправляем действие "Отправка аудио" (показывается в статусе набора текста)
                 await message.bot.send_chat_action(chat_id=message.chat.id, action="upload_document")
                 audio = FSInputFile(filepath)
                 await message.bot.send_audio(chat_id=message.chat.id, audio=audio, caption=title)
@@ -168,26 +181,28 @@ async def process_download(message: types.Message, query: str, start_time: float
             await msg.edit_text("Не удалось найти или скачать музыку. Попробуйте изменить запрос.")
 
     except Exception as e:
-        logging.error(f"Handler error: {e}")
+        logging.error(f"Ошибка в обработчике скачивания: {e}")
         await msg.edit_text("Произошла непредвиденная ошибка. Пожалуйста, попробуйте позже.")
     finally:
-        # Guarantee removal of all files related to this file_id (e.g. .mp3, .webm, .part)
+        # Гарантированное удаление всех временных файлов, связанных с этим file_id (например, .mp3, .webm, .part)
         for f in glob.glob(f"{file_id}.*"):
             for attempt in range(3):
                 try:
                     os.remove(f)
-                    break # successfully removed
+                    break # Файл успешно удален
                 except OSError as e:
                     if attempt < 2:
-                        await asyncio.sleep(1) # wait for process to release file lock
+                        # Если файл заблокирован (например, Windows PermissionError из-за yt-dlp),
+                        # ждем секунду и пробуем снова.
+                        await asyncio.sleep(1)
                     else:
-                        logging.error(f"Failed to remove file {f} after 3 attempts: {e}")
+                        logging.error(f"Не удалось удалить файл {f} после 3 попыток: {e}")
 
 @dp.message(F.text)
 async def handle_text(message: types.Message):
     text = message.text.strip()
 
-    # Try to extract time range like "10:00-15:30" or "01:00:00-01:05:00" from the end of the string
+    # Пытаемся извлечь временной интервал, например "10:00-15:30" или "01:00:00-01:05:00" в конце строки
     time_range_match = re.search(r'\s+([\d:]+)-([\d:]+)$', text)
 
     start_time = None
@@ -198,19 +213,19 @@ async def handle_text(message: types.Message):
         try:
             start_time = parse_time(time_range_match.group(1))
             end_time = parse_time(time_range_match.group(2))
-            # Remove the time range part from the query
+            # Удаляем часть с таймкодом из поискового запроса
             query = text[:time_range_match.start()].strip()
         except ValueError:
-            pass # fallback to full download if time parsing fails
+            pass # Если не удалось распарсить время, просто скачиваем видео целиком
 
     query_lower = query.lower()
     is_url = query_lower.startswith('http://') or query_lower.startswith('https://')
 
     if is_url:
-        # Direct URL download
+        # Скачиваем напрямую, если отправлена прямая ссылка
         await process_download(message, query, start_time, end_time)
     else:
-        # Text search
+        # Если это текст — ищем видео на YouTube
         msg = await message.answer("Ищу треки, пожалуйста, подождите...")
         loop = asyncio.get_running_loop()
         results = await loop.run_in_executor(None, search_youtube, query)
@@ -222,13 +237,14 @@ async def handle_text(message: types.Message):
         buttons = []
         for res in results:
             title = res['title']
-            # Limit title length to prevent Telegram API errors
+            # Обрезаем название, чтобы избежать ошибок Telegram API из-за слишком длинных кнопок
             if len(title) > 40:
                 title = title[:37] + "..."
             duration = format_duration(res['duration'])
             btn_text = f"🎵 {title} ({duration})"
-            # Use the explicit id from yt-dlp to avoid string splitting bugs
-            # Limit id to 20 chars to safely fit within Telegram's 64 byte limit
+
+            # Используем явный ID от yt-dlp, чтобы избежать багов с парсингом ссылок
+            # Ограничиваем ID до 20 символов, чтобы гарантированно вписаться в 64-байтный лимит Telegram для callback_data
             video_id = str(res['id'])[:20]
             st_str = str(start_time) if start_time is not None else ""
             et_str = str(end_time) if end_time is not None else ""
@@ -240,12 +256,14 @@ async def handle_text(message: types.Message):
 
 @dp.callback_query(F.data.startswith('dl|'))
 async def handle_download_callback(callback: types.CallbackQuery):
+    # Разбираем данные, пришедшие с нажатой кнопки
     parts = callback.data.split('|')
     video_id = parts[1]
 
     start_time = None
     end_time = None
 
+    # Пытаемся восстановить таймкоды, если они были сохранены в кнопке
     if len(parts) >= 4:
         if parts[2]:
             start_time = float(parts[2])
@@ -254,13 +272,13 @@ async def handle_download_callback(callback: types.CallbackQuery):
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # Acknowledge the callback
+    # Подтверждаем получение callback_query, чтобы у пользователя пропали "часики" на кнопке
     await callback.answer()
 
-    # Update the original message to show progress and remove the keyboard
+    # Обновляем оригинальное сообщение, убираем клавиатуру и показываем текст загрузки
     await callback.message.edit_text(f"Вы выбрали трек. Начинаю загрузку...", reply_markup=None)
 
-    # Start the download process
+    # Запускаем основной процесс скачивания
     await process_download(callback.message, url, start_time, end_time, is_callback=True)
 
 async def main():
