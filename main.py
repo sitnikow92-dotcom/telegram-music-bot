@@ -112,6 +112,7 @@ async def handle_text(message: types.Message):
                 await msg.edit_text("Извините, аудио слишком длинное. Лимит Telegram — 50 МБ (около 35 минут).")
             else:
                 await msg.delete()
+                await message.bot.send_chat_action(chat_id=message.chat.id, action="upload_document")
                 audio = FSInputFile(filepath)
                 await message.answer_audio(audio=audio, caption=title)
         else:
