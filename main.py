@@ -9,6 +9,7 @@ from aiogram.filters.command import Command
 from aiogram.types import FSInputFile
 from dotenv import load_dotenv
 import yt_dlp
+from yt_dlp.utils import match_filter_func
 
 # Load environment variables
 load_dotenv()
@@ -43,7 +44,8 @@ def download_audio(file_id: str, query: str, start_time: float = None, end_time:
         'outtmpl': f'{file_id}.%(ext)s',
         'noplaylist': True,
         'quiet': True,
-        'default_search': 'ytsearch1'
+        'default_search': 'ytsearch1',
+        'match_filter': match_filter_func('!is_live')
     }
 
     if start_time is not None and end_time is not None:
