@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import os
+import re
 import uuid
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters.command import Command
 from aiogram.types import FSInputFile
 from dotenv import load_dotenv
 import yt_dlp
+from yt_dlp.utils import download_range_func
 
 # Load environment variables
 load_dotenv()
@@ -20,7 +22,16 @@ if BOT_TOKEN:
     bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-def download_audio(query: str):
+def parse_time(time_str: str) -> float:
+    """Parses time string (e.g., '1:30', '10:00:00', '45') to seconds."""
+    parts = list(map(float, time_str.split(':')))
+    if len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    elif len(parts) == 2:
+        return parts[0] * 60 + parts[1]
+    return parts[0]
+
+def download_audio(query: str, start_time: float = None, end_time: float = None):
     """
     Downloads audio using yt_dlp and returns the filepath and title.
     """
@@ -37,6 +48,10 @@ def download_audio(query: str):
         'quiet': True,
         'default_search': 'ytsearch1'
     }
+
+    if start_time is not None and end_time is not None:
+        ydl_opts['download_ranges'] = download_range_func(None, [(start_time, end_time)])
+        ydl_opts['force_keyframes_at_cuts'] = True
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -64,12 +79,29 @@ async def cmd_start(message: types.Message):
 
 @dp.message(F.text)
 async def handle_text(message: types.Message):
-    query = message.text
+    text = message.text.strip()
+
+    # Try to extract time range like "10:00-15:30" or "01:00:00-01:05:00" from the end of the string
+    time_range_match = re.search(r'\s+([\d:]+)-([\d:]+)$', text)
+
+    start_time = None
+    end_time = None
+    query = text
+
+    if time_range_match:
+        try:
+            start_time = parse_time(time_range_match.group(1))
+            end_time = parse_time(time_range_match.group(2))
+            # Remove the time range part from the query
+            query = text[:time_range_match.start()].strip()
+        except ValueError:
+            pass # fallback to full download if time parsing fails
+
     msg = await message.answer("Ищу и скачиваю музыку, пожалуйста, подождите...")
 
     loop = asyncio.get_running_loop()
     try:
-        filepath, title = await loop.run_in_executor(None, download_audio, query)
+        filepath, title = await loop.run_in_executor(None, download_audio, query, start_time, end_time)
 
         if filepath and os.path.exists(filepath):
             file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
