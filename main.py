@@ -56,7 +56,8 @@ def download_audio(file_id: str, query: str, start_time: float = None, end_time:
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            if not query.startswith('http://') and not query.startswith('https://'):
+            query_lower = query.lower()
+            if not query_lower.startswith('http://') and not query_lower.startswith('https://'):
                 search_query = f"ytsearch1:{query}"
             else:
                 search_query = query
